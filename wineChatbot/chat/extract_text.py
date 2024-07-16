@@ -1,5 +1,7 @@
 # extract_text.py
+import os
 import fitz
+from wineChatbot.settings import BASE_DIR
 
 def extract_text_from_pdf(pdf_path):
     document = fitz.open(pdf_path)
@@ -10,7 +12,7 @@ def extract_text_from_pdf(pdf_path):
     return text
 
 if __name__ == "__main__":
-    pdf_path = 'Corpus.pdf'
+    pdf_path = os.path.join(BASE_DIR, 'chat/Corpus.pdf')
     corpus_text = extract_text_from_pdf(pdf_path)
     with open('corpus.txt', 'w') as file:
         file.write(corpus_text)
