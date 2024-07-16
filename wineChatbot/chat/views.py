@@ -8,6 +8,8 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 from django.views.decorators.csrf import csrf_exempt
 from django.utils.decorators import method_decorator
+from transformers import DistilBertForQuestionAnswering, DistilBertTokenizerFast
+import torch
 
 conversation_history = []
 
@@ -26,22 +28,33 @@ def get_best_match(question, corpus):
         return corpus[best_match_index]['answer']
     return None
 
-@method_decorator(csrf_exempt, name='dispatch')
 class ChatbotView(APIView):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.model = DistilBertForQuestionAnswering.from_pretrained('fine-tuned-model')
+        self.tokenizer = DistilBertTokenizerFast.from_pretrained('fine-tuned-model')
+
     def post(self, request):
         question = request.data.get('question')
         conversation_history.append({'role': 'user', 'content': question})
 
-        corpus = load_corpus()
-        answer = get_best_match(question, corpus)
-        if answer:
-            response = answer
-        else:
+        inputs = self.tokenizer(question, "Your context or additional information here", return_tensors="pt", truncation=True)
+        with torch.no_grad():
+            outputs = self.model(**inputs)
+            answer_start_scores = outputs.start_logits
+            answer_end_scores = outputs.end_logits
+
+        answer_start = torch.argmax(answer_start_scores)
+        answer_end = torch.argmax(answer_end_scores) + 1
+        answer = self.tokenizer.convert_tokens_to_string(self.tokenizer.convert_ids_to_tokens(inputs["input_ids"][0][answer_start:answer_end]))
+
+        if not answer or answer == self.tokenizer.sep_token:
             response = "Please contact the business directly for more information."
+        else:
+            response = answer
 
         conversation_history.append({'role': 'bot', 'content': response})
         return Response({'answer': response})
-
 
 
 def chat_view(request):
