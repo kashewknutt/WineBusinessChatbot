@@ -1,4 +1,5 @@
 # chat/views.py
+from django.shortcuts import render
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from chat.models import CorpusEntry
@@ -8,35 +9,39 @@ from sklearn.metrics.pairwise import cosine_similarity
 from django.views.decorators.csrf import csrf_exempt
 from django.utils.decorators import method_decorator
 
-chatbot = pipeline('question-answering', model='distilbert-base-uncased-distilled-squad')
 conversation_history = []
 
-def get_relevant_context(question, corpus):
-    vectorizer = TfidfVectorizer().fit_transform([question] + [entry['question'] for entry in corpus])
+def load_corpus():
+    entries = CorpusEntry.objects.all()
+    corpus = [{'question': entry.question, 'answer': entry.answer} for entry in entries]
+    return corpus
+
+def get_best_match(question, corpus):
+    questions = [entry['question'] for entry in corpus]
+    vectorizer = TfidfVectorizer().fit_transform([question] + questions)
     vectors = vectorizer.toarray()
-    cosine_matrix = cosine_similarity(vectors)
-    similar_docs = cosine_matrix[0][1:]
-    sorted_indices = similar_docs.argsort()[-5:][::-1]  # Get top 5 relevant entries
-    relevant_context = ' '.join([corpus[i]['answer'] for i in sorted_indices])
-    return relevant_context, sorted_indices[0] if similar_docs[sorted_indices[0]] > 0.2 else None  # Threshold for relevance
+    cosine_sim = cosine_similarity(vectors[0:1], vectors[1:]).flatten()
+    best_match_index = cosine_sim.argmax()
+    if cosine_sim[best_match_index] > 0.5:  # You can adjust this threshold as needed
+        return corpus[best_match_index]['answer']
+    return None
 
 @method_decorator(csrf_exempt, name='dispatch')
 class ChatbotView(APIView):
     def post(self, request):
         question = request.data.get('question')
         conversation_history.append({'role': 'user', 'content': question})
-        
-        entries = CorpusEntry.objects.all()
-        corpus = [{'question': entry.question, 'answer': entry.answer} for entry in entries]
-        
-        context, best_match_index = get_relevant_context(question, corpus)
-        if best_match_index is not None:
-            answer = corpus[best_match_index]['answer']
+
+        corpus = load_corpus()
+        answer = get_best_match(question, corpus)
+        if answer:
+            response = answer
         else:
-            answer = "Please contact the business directly for more information."
-        
-        conversation_history.append({'role': 'bot', 'content': answer})
-        return Response({'answer': answer})
+            response = "Please contact the business directly for more information."
+
+        conversation_history.append({'role': 'bot', 'content': response})
+        return Response({'answer': response})
+
 
 
 def chat_view(request):
